@@ -33,9 +33,9 @@ func TestSingleFlightCallDoWithError(t *testing.T) {
 func TestSingleFlightCallDoRestrict(t *testing.T) {
 	g := NewSingleFlight()
 	ch := make(chan string)
-	var times int32 = 0
+	var count int32 = 0
 	fn := func() (any, error) {
-		atomic.AddInt32(&times, 1)
+		atomic.AddInt32(&count, 1)
 		return <-ch, nil
 	}
 
@@ -54,18 +54,18 @@ func TestSingleFlightCallDoRestrict(t *testing.T) {
 	time.Sleep(time.Millisecond * 100)
 	ch <- "value"
 	wg.Wait()
-	assert.Equal(t, int32(1), times)
+	assert.Equal(t, int32(1), count)
 }
 
 // TestSingleFlightCallDoDiffRestrict 测试差异化的并发抑制
 func TestSingleFlightCallDoDiffRestrict(t *testing.T) {
 	g := NewSingleFlight()
 	ch := make(chan struct{})
-	var times int32 = 0
+	var count int32 = 0
 	testCases := []string{"key1", "key2", "key3", "key4", "key1", "key2", "key3", "key4", "key2", "key4", "key2", "key1", "key2"}
 
 	fn := func() (any, error) {
-		atomic.AddInt32(&times, 1)
+		atomic.AddInt32(&count, 1)
 		time.Sleep(time.Microsecond * 100)
 		return nil, nil
 	}
@@ -85,7 +85,7 @@ func TestSingleFlightCallDoDiffRestrict(t *testing.T) {
 	close(ch)
 	wg.Wait()
 
-	assert.Equal(t, int32(4), times)
+	assert.Equal(t, int32(4), count)
 }
 
 // TestSingleFlightCallDoExRestrict 测试DoEx的并发抑制

@@ -7,18 +7,20 @@ import (
 
 type (
 	Cache struct {
-		name string
-		lock sync.Mutex
-		data map[string]any
-		lru  lru
+		name    string
+		lock    sync.Mutex
+		data    map[string]any
+		lru     lru
+		barrier SingleFlight
 	}
 )
 
 func NewCache(name string, onEvict func(string)) *Cache {
 	cache := &Cache{
-		name: name,
-		data: make(map[string]any),
-		lru:  emptyLruCache,
+		name:    name,
+		data:    make(map[string]any),
+		lru:     emptyLruCache,
+		barrier: NewSingleFlight(),
 	}
 
 	return cache
@@ -42,6 +44,28 @@ func (c *Cache) Set(key string, val any) {
 	c.lru.add(key)
 }
 
+// Take 尝试在Cache获取指定key的值
+// 如果有直接返回，否则调用 fetch 获取，并在存入Cache后返回
+func (c *Cache) Take(key string, fetch func() (any, error)) (any, error) {
+	if val, ok := c.get(key); ok {
+		return val, nil
+	}
+
+	val, err := c.barrier.Do(key, func() (any, error) {
+		v, e := fetch()
+		if e != nil {
+			return nil, e
+		}
+		c.Set(key, v)
+		return v, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
 func (c *Cache) get(key string) (any, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -53,6 +77,7 @@ func (c *Cache) get(key string) (any, bool) {
 	return val, ok
 }
 
+// size 用于日志/分析
 func (c *Cache) size() int {
 	c.lock.Lock()
 	defer c.lock.Unlock()
