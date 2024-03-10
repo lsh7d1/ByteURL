@@ -1,0 +1,17 @@
+# Reference https://github.com/github/gitignore/blob/master/Go.gitignore
+# Binaries for programs and plugins
+*.exe
+*.exe~
+
+# Go workspace file
+go.work
+
+# project
+*.cert
+*.log
+bin/
+
+# Develop tools
+.vscode/
+.idea/
+*.swp
