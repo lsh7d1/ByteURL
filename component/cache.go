@@ -2,56 +2,88 @@ package component
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
+	"time"
+)
+
+const (
+	defaultSlots = 300 // Default TimeWheel slot number
 )
 
 type (
+	CacheOption func(*Cache)
+
 	Cache struct {
-		name    string
-		lock    sync.Mutex
-		data    map[string]any
-		lru     lru
-		barrier SingleFlight
+		name        string
+		lock        sync.Mutex
+		data        map[string]any
+		lru         lru
+		barrier     SingleFlight
+		expire      time.Duration
+		timingWheel *TimeWheel
 	}
 )
 
-func NewCache(name string, onEvict func(string)) *Cache {
+func NewCache(name string, expire time.Duration, opts ...CacheOption) *Cache {
 	cache := &Cache{
 		name:    name,
 		data:    make(map[string]any),
 		lru:     emptyLruCache,
 		barrier: NewSingleFlight(),
+		expire:  expire,
 	}
+
+	for _, opt := range opts {
+		opt(cache)
+	}
+
+	timeWheel, err := NewTimeWheel(defaultSlots, time.Second)
+	if err != nil {
+		panic(fmt.Errorf("[cache]: NewTimeWheel(defaultSlots, time.Second) failed... err: %#v", err))
+	}
+
+	cache.timingWheel = timeWheel
 
 	return cache
 }
 
 func (c *Cache) Del(key string) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 	c.lru.del(key)
 	delete(c.data, key)
+	c.lock.Unlock()
+	c.timingWheel.RemoveTask(key)
 }
 
 func (c *Cache) Get(key string) (any, bool) {
 	return c.get(key)
 }
 
-func (c *Cache) Set(key string, val any) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.data[key] = val
-	c.lru.add(key)
+func (c *Cache) Set(key string, value any) {
+	c.SetWithExpire(key, value, c.expire)
 }
 
-// Take 尝试在Cache获取指定key的值
-// 如果有直接返回，否则调用 fetch 获取，并在存入Cache后返回
+func (c *Cache) SetWithExpire(key string, value any, expire time.Duration) {
+	c.lock.Lock()
+	c.data[key] = value
+	c.lru.add(key)
+	c.lock.Unlock()
+
+	c.timingWheel.AddTask(key, expire, func() {
+		c.Del(key)
+	})
+}
+
+// Take Try to get the value of the specified key in the Cache
+// If there is a direct return, otherwise call fetch
+// to obtain it and return after storing it in the Cache.
 func (c *Cache) Take(key string, fetch func() (any, error)) (any, error) {
-	if val, ok := c.get(key); ok {
-		return val, nil
+	if value, ok := c.get(key); ok {
+		return value, nil
 	}
 
-	val, err := c.barrier.Do(key, func() (any, error) {
+	value, err := c.barrier.Do(key, func() (any, error) {
 		v, e := fetch()
 		if e != nil {
 			return nil, e
@@ -63,25 +95,39 @@ func (c *Cache) Take(key string, fetch func() (any, error)) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return val, nil
+	return value, nil
 }
 
 func (c *Cache) get(key string) (any, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	val, ok := c.data[key]
+	value, ok := c.data[key]
 	if ok {
 		c.lru.add(key)
 	}
-	return val, ok
+	return value, ok
 }
 
-// size 用于日志/分析
+func (c *Cache) onEvict(key string) {
+	// already locked
+	delete(c.data, key)
+	c.timingWheel.RemoveTask(key)
+}
+
 func (c *Cache) size() int {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	return len(c.data)
+}
+
+func WithCapLimit(limit int) CacheOption {
+	return func(c *Cache) {
+		if limit <= 0 {
+			return
+		}
+		c.lru = newLruCache(limit, c.onEvict)
+	}
 }
 
 type (
@@ -96,7 +142,7 @@ type (
 		capacity int
 		list     *list.List
 		evicts   map[string]*list.Element
-		onEvict  func(string) // 删除时的回调
+		onEvict  func(string) // Callback when deleting
 	}
 )
 
@@ -117,35 +163,35 @@ func newLruCache(capacity int, onEvict func(string)) lru {
 	}
 }
 
-func (c *lruCache) add(key string) {
-	if elem, ok := c.evicts[key]; ok {
-		c.list.MoveToFront(elem)
+func (lru *lruCache) add(key string) {
+	if elem, ok := lru.evicts[key]; ok {
+		lru.list.MoveToFront(elem)
 		return
 	}
 
-	c.evicts[key] = c.list.PushFront(key) // PushFront 在list前插入key并返回Element
-	if c.list.Len() > c.capacity {
-		c.removeOldest()
+	lru.evicts[key] = lru.list.PushFront(key)
+	if lru.list.Len() > lru.capacity {
+		lru.removeOldest()
 	}
 }
 
-func (c *lruCache) del(key string) {
-	if elem, ok := c.evicts[key]; ok {
-		c.removeElement(elem)
+func (lru *lruCache) del(key string) {
+	if elem, ok := lru.evicts[key]; ok {
+		lru.removeElement(elem)
 	}
 }
 
-// removeOldest 删除lru末项
-func (c *lruCache) removeOldest() {
-	elem := c.list.Back()
+// removeOldest delete the last item of lru
+func (lru *lruCache) removeOldest() {
+	elem := lru.list.Back()
 	if elem != nil {
-		c.removeElement(elem)
+		lru.removeElement(elem)
 	}
 }
 
-func (c *lruCache) removeElement(elem *list.Element) {
-	c.list.Remove(elem)
+func (lru *lruCache) removeElement(elem *list.Element) {
+	lru.list.Remove(elem)
 	key := elem.Value.(string)
-	delete(c.evicts, key)
-	c.onEvict(key)
+	delete(lru.evicts, key)
+	lru.onEvict(key)
 }

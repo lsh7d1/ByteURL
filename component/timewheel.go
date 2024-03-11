@@ -2,9 +2,15 @@ package component
 
 import (
 	"container/list"
+	"errors"
 	"log"
 	"sync"
 	"time"
+)
+
+var (
+	ErrArgs   = errors.New("[timewheel]: invalid args")
+	ErrClosed = errors.New("[timewheel]: has been closed")
 )
 
 type (
@@ -58,13 +64,34 @@ func (tw *TimeWheel) Stop() {
 	})
 }
 
-func (tw *TimeWheel) AddTask(key string, delay time.Duration, task func()) {
+func (tw *TimeWheel) AddTask(key string, delay time.Duration, task func()) error {
+	if key == "" || delay <= 0 || task == nil {
+		return ErrArgs
+	}
 	pos, circle := tw.getPositionAndCircle(delay)
-	tw.addChan <- &taskEntry{
+	select {
+	case tw.addChan <- &taskEntry{
 		task:   task,
 		key:    key,
 		pos:    pos,
 		circle: circle,
+	}:
+		return nil
+	case <-tw.stopChan:
+		return ErrClosed
+	}
+}
+
+func (tw *TimeWheel) RemoveTask(key string) error {
+	if key == "" {
+		return ErrArgs
+	}
+
+	select {
+	case tw.removeChan <- key:
+		return nil
+	case <-tw.stopChan:
+		return ErrClosed
 	}
 }
 
