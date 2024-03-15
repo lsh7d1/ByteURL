@@ -1,4 +1,4 @@
-package component
+package timex
 
 import (
 	"container/list"
@@ -31,6 +31,9 @@ type (
 		stopChan   chan struct{}
 		addChan    chan *taskEntry
 		removeChan chan string
+		// The map here is thread-safe, ensuring the thread-safety
+		// of the time wheel during concurrent reading and writing.
+		// TODO: Leave it as interface, you can use non-thread-safe map, and the caller ensures thread safety.
 		keyToEntry sync.Map // key --> val:(taskEntry->list.Element->any)
 	}
 )
@@ -53,9 +56,9 @@ func NewTimeWheel(numSlots int, interval time.Duration) (*TimeWheel, error) {
 	return tw, nil
 }
 
-func newTimeWheelWithTicker(numSlots int, interval time.Duration, ticker *time.Ticker) (*TimeWheel, error) {
-	panic("unimplemented")
-}
+// func newTimeWheelWithTicker(numSlots int, interval time.Duration, ticker *time.Ticker) (*TimeWheel, error) {
+// 	panic("unimplemented")
+// }
 
 func (tw *TimeWheel) Stop() {
 	tw.Do(func() {

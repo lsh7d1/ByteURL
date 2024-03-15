@@ -1,21 +1,10 @@
-package component
+package timex
 
 import (
 	"testing"
 	"time"
 )
 
-/*
---- FAIL: TestTimeWheel (12.02s)
-
-	timewheel_test.go:26: start: 2024-03-11 17:37:48.7934477 +0800 CST m=+0.004245201
-	timewheel_test.go:29: task1, 2024-03-11 17:37:50.8066652 +0800 CST m=+2.017462701
-	timewheel_test.go:37: task2, 2024-03-11 17:37:55.80156 +0800 CST m=+7.012357501
-
-FAIL
-exit status 1
-FAIL    byteurl/component       12.055s
-*/
 func TestTimeWheel(t *testing.T) {
 	tw, err := NewTimeWheel(8, time.Millisecond*500) // 4 seconds a circle
 	if err != nil {

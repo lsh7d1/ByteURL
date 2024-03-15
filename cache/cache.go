@@ -1,14 +1,16 @@
-package component
+package cache
 
 import (
-	"container/list"
 	"fmt"
 	"sync"
 	"time"
+
+	"byteurl/syncx"
+	"byteurl/timex"
 )
 
 const (
-	defaultSlots = 300 // Default TimeWheel slot number
+	defaultSlots = 300 // Number of default time wheel slots
 )
 
 type (
@@ -19,9 +21,9 @@ type (
 		lock        sync.Mutex
 		data        map[string]any
 		lru         lru
-		barrier     SingleFlight
+		barrier     syncx.SingleFlight
 		expire      time.Duration
-		timingWheel *TimeWheel
+		timingWheel *timex.TimeWheel
 	}
 )
 
@@ -30,7 +32,7 @@ func NewCache(name string, expire time.Duration, opts ...CacheOption) *Cache {
 		name:    name,
 		data:    make(map[string]any),
 		lru:     emptyLruCache,
-		barrier: NewSingleFlight(),
+		barrier: syncx.NewSingleFlight(),
 		expire:  expire,
 	}
 
@@ -38,7 +40,7 @@ func NewCache(name string, expire time.Duration, opts ...CacheOption) *Cache {
 		opt(cache)
 	}
 
-	timeWheel, err := NewTimeWheel(defaultSlots, time.Second)
+	timeWheel, err := timex.NewTimeWheel(defaultSlots, time.Second)
 	if err != nil {
 		panic(fmt.Errorf("[cache]: NewTimeWheel(defaultSlots, time.Second) failed... err: %#v", err))
 	}
@@ -50,7 +52,7 @@ func NewCache(name string, expire time.Duration, opts ...CacheOption) *Cache {
 
 func (c *Cache) Del(key string) {
 	c.lock.Lock()
-	c.lru.del(key)
+	c.lru.Del(key)
 	delete(c.data, key)
 	c.lock.Unlock()
 	c.timingWheel.RemoveTask(key)
@@ -67,7 +69,7 @@ func (c *Cache) Set(key string, value any) {
 func (c *Cache) SetWithExpire(key string, value any, expire time.Duration) {
 	c.lock.Lock()
 	c.data[key] = value
-	c.lru.add(key)
+	c.lru.Add(key)
 	c.lock.Unlock()
 
 	c.timingWheel.AddTask(key, expire, func() {
@@ -104,7 +106,7 @@ func (c *Cache) get(key string) (any, bool) {
 
 	value, ok := c.data[key]
 	if ok {
-		c.lru.add(key)
+		c.lru.Add(key)
 	}
 	return value, ok
 }
@@ -128,70 +130,4 @@ func WithCapLimit(limit int) CacheOption {
 		}
 		c.lru = newLruCache(limit, c.onEvict)
 	}
-}
-
-type (
-	lru interface {
-		add(key string)
-		del(key string)
-	}
-
-	emptyLru struct{}
-
-	lruCache struct {
-		capacity int
-		list     *list.List
-		evicts   map[string]*list.Element
-		onEvict  func(string) // Callback when deleting
-	}
-)
-
-var _ lru = (*emptyLru)(nil)
-var _ lru = (*lruCache)(nil)
-
-var emptyLruCache = emptyLru{}
-
-func (e emptyLru) add(string) {} // do nothing
-func (e emptyLru) del(string) {} // do nothing
-
-func newLruCache(capacity int, onEvict func(string)) lru {
-	return &lruCache{
-		capacity,
-		list.New(),
-		make(map[string]*list.Element, capacity),
-		onEvict,
-	}
-}
-
-func (lru *lruCache) add(key string) {
-	if elem, ok := lru.evicts[key]; ok {
-		lru.list.MoveToFront(elem)
-		return
-	}
-
-	lru.evicts[key] = lru.list.PushFront(key)
-	if lru.list.Len() > lru.capacity {
-		lru.removeOldest()
-	}
-}
-
-func (lru *lruCache) del(key string) {
-	if elem, ok := lru.evicts[key]; ok {
-		lru.removeElement(elem)
-	}
-}
-
-// removeOldest delete the last item of lru
-func (lru *lruCache) removeOldest() {
-	elem := lru.list.Back()
-	if elem != nil {
-		lru.removeElement(elem)
-	}
-}
-
-func (lru *lruCache) removeElement(elem *list.Element) {
-	lru.list.Remove(elem)
-	key := elem.Value.(string)
-	delete(lru.evicts, key)
-	lru.onEvict(key)
 }

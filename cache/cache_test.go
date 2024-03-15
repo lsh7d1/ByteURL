@@ -1,4 +1,4 @@
-package component
+package cache
 
 import (
 	"errors"
