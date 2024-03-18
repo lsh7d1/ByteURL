@@ -7,13 +7,18 @@ import (
 
 type (
 	lru interface {
-		Add(key string)
+		Get(key string) (string, bool)
+		Add(key, value string)
 		Del(key string)
 	}
 
 	emptyLru struct{}
 
-	lruCache struct {
+	entry struct {
+		key, value string
+	}
+
+	LruCache struct {
 		capacity int
 		list     *list.List
 		items    map[string]*list.Element
@@ -23,18 +28,18 @@ type (
 )
 
 var _ lru = (*emptyLru)(nil)
-var _ lru = (*lruCache)(nil)
+var _ lru = (*LruCache)(nil)
 
 var emptyLruCache = emptyLru{}
 
-func (e emptyLru) Get(string) (any, bool) { // do nothing
-	return nil, false
+func (e emptyLru) Get(string) (string, bool) { // do nothing
+	return emptyString, false
 }
-func (e emptyLru) Add(string) {} // do nothing
-func (e emptyLru) Del(string) {} // do nothing
+func (e emptyLru) Add(string, string) {} // do nothing
+func (e emptyLru) Del(string)         {} // do nothing
 
-func newLruCache(capacity int, onEvict func(string)) lru {
-	return &lruCache{
+func NewLruCache(capacity int, onEvict func(string)) lru {
+	return &LruCache{
 		capacity,
 		list.New(),
 		make(map[string]*list.Element, capacity),
@@ -43,17 +48,17 @@ func newLruCache(capacity int, onEvict func(string)) lru {
 	}
 }
 
-func (lru *lruCache) Get(key string) (any, bool) {
+func (lru *LruCache) Get(key string) (string, bool) {
 	lru.lock.RLock()
 	defer lru.lock.RUnlock()
 	if elem, ok := lru.getItem(key); ok {
 		lru.list.MoveToFront(elem)
-		return elem.Value, true
+		return elem.Value.(entry).value, true
 	}
-	return nil, false
+	return emptyString, false
 }
 
-func (lru *lruCache) Add(key string) {
+func (lru *LruCache) Add(key, value string) {
 	lru.lock.Lock()
 	defer lru.lock.Unlock()
 	if elem, ok := lru.items[key]; ok {
@@ -61,13 +66,13 @@ func (lru *lruCache) Add(key string) {
 		return
 	}
 
-	lru.items[key] = lru.list.PushFront(key)
+	lru.items[key] = lru.list.PushFront(entry{key, value})
 	if lru.list.Len() > lru.capacity {
 		lru.removeOldest()
 	}
 }
 
-func (lru *lruCache) Del(key string) {
+func (lru *LruCache) Del(key string) {
 	lru.lock.Lock()
 	defer lru.lock.Unlock()
 	if elem, ok := lru.items[key]; ok {
@@ -75,7 +80,7 @@ func (lru *lruCache) Del(key string) {
 	}
 }
 
-func (lru *lruCache) getItem(key string) (*list.Element, bool) {
+func (lru *LruCache) getItem(key string) (*list.Element, bool) {
 	// already locked
 	if elem, ok := lru.items[key]; ok {
 		return elem, true
@@ -84,16 +89,23 @@ func (lru *lruCache) getItem(key string) (*list.Element, bool) {
 }
 
 // removeOldest delete the last item of lru
-func (lru *lruCache) removeOldest() {
+func (lru *LruCache) removeOldest() {
 	elem := lru.list.Back()
 	if elem != nil {
 		lru.removeElement(elem)
 	}
 }
 
-func (lru *lruCache) removeElement(elem *list.Element) {
+// removeElement really delete a [k, v] object, (list.element form)
+func (lru *LruCache) removeElement(elem *list.Element) {
 	lru.list.Remove(elem)
-	key := elem.Value.(string)
+	key := elem.Value.(entry).key
 	delete(lru.items, key)
-	lru.onEvict(key)
+	if lru.onEvict != nil {
+		lru.onEvict(key)
+	}
 }
+
+const (
+	emptyString string = ""
+)

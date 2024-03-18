@@ -2,8 +2,6 @@ package cache
 
 import (
 	"errors"
-	"math/rand"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,19 +11,21 @@ import (
 )
 
 /*
-go test -v cache_test.go cache.go timewheel.go singlefilght.go
 === RUN   TestCacheGet
 --- PASS: TestCacheGet (0.00s)
 === RUN   TestCacheDel
+Delete ~~!!!!
 --- PASS: TestCacheDel (0.00s)
 === RUN   TestCacheTake
---- PASS: TestCacheTake (0.11s)
+Delete ~~!!!!
+--- PASS: TestCacheTake (1.01s)
 === RUN   TestCacheTakeWithError
---- PASS: TestCacheTakeWithError (0.11s)
+Delete ~~!!!!
+--- PASS: TestCacheTakeWithError (1.01s)
 === RUN   TestCacheWithLimit
 --- PASS: TestCacheWithLimit (0.00s)
 PASS
-ok      command-line-arguments  0.258s
+ok      command-line-arguments  2.135s
 */
 
 func TestCacheGet(t *testing.T) {
@@ -57,31 +57,20 @@ func TestCacheDel(t *testing.T) {
 	assert.Equal(t, "value2", value2)
 }
 
-func BenchmarkCache(b *testing.B) {
-	cache := NewCache("myCache", time.Second)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		num := rand.Int()
-		cache.Set(strconv.Itoa(num), num)
-		cache.Get(strconv.Itoa(rand.Int()))
-	}
-}
-
 func TestCacheTake(t *testing.T) {
-	cache := NewCache("myCache", time.Second)
-
-	const n int = 100
+	const n int = 1000
+	cache := NewCache("myCache", time.Minute, WithAroundCapLimit(n))
 	var wg sync.WaitGroup
 	var count int32 = 0
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
-			val, err := cache.Take("key", func() (any, error) {
+			val, err := cache.Take("key1", func() (string, error) {
 				atomic.AddInt32(&count, 1)
-				time.Sleep(time.Millisecond * 100)
-				return "value", nil
+				time.Sleep(time.Second)
+				return "value1", nil
 			})
-			assert.Equal(t, "value", val)
+			assert.Equal(t, "value1", val)
 			assert.Nil(t, err)
 			wg.Done()
 		}()
@@ -92,19 +81,18 @@ func TestCacheTake(t *testing.T) {
 }
 
 func TestCacheTakeWithError(t *testing.T) {
-	cache := NewCache("myCache", time.Second)
-
 	const n int = 100
+	cache := NewCache("myCache", time.Minute, WithAroundCapLimit(n))
 	var count int32
 	var wg sync.WaitGroup
 	errSame := errors.New("SameError")
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
-			val, err := cache.Take("key", func() (any, error) {
+			val, err := cache.Take("key", func() (string, error) {
 				atomic.AddInt32(&count, 1)
-				time.Sleep(time.Millisecond * 100)
-				return nil, errSame
+				time.Sleep(time.Second)
+				return "", errSame
 			})
 			assert.Nil(t, val)
 			assert.Equal(t, errSame, err)
@@ -118,7 +106,6 @@ func TestCacheTakeWithError(t *testing.T) {
 
 func TestCacheWithLimit(t *testing.T) {
 	cache := NewCache("myCache", time.Second*3, WithCapLimit(3))
-
 	cache.Set("key1", "value1")
 	cache.Set("key2", "value2")
 	cache.Set("key3", "value3")

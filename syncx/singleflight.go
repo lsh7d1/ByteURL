@@ -3,26 +3,30 @@ package syncx
 import "sync"
 
 type (
-	// SingleFlight 让对同一个key的并发调用共享调用结果
+	// SingleFlight allows concurrent calls to the same key to share the call results
 	SingleFlight interface {
-		// Do 执行给定的函数fn，并按key返回结果
-		// 如果有多个请求使用同样的key，只有一个请求会执行fn
-		// 其他请求等待并共享结果
+		// Do execute the given function fn and returns
+		// the result according to the specified key.
+		// If there are multiple requests using the same key,
+		// only one request will execute fn. Other requests
+		// wait and share the results.
 		Do(key string, fn func() (any, error)) (any, error)
-		// DoEx 与Do方法类似，但它多返回一个bool值
-		// 表示返回的结果是否新鲜（是否是最近执行fn得到的结果
+		// DoEx is similar to the Do method, but it returns
+		// an additional bool value indicating whether the
+		// result is fresh (whether it is the result obtained
+		// by executing fn recently.)
 		DoEx(key string, fn func() (any, error)) (any, bool, error)
 	}
 
-	// call 阻塞对于同一个 key 的一组调用
+	// call blocks a group of calls for the same key
 	call struct {
 		wg  sync.WaitGroup
 		res any
 		err error
 	}
 
-	// flightGroup 是SingleFlight的实现类
-	// 保存正在进行的调用
+	// flightGroup is the implementation class of SingleFlight
+	// and saves ongoing calls
 	flightGroup struct {
 		lock  sync.Mutex
 		calls map[string]*call
