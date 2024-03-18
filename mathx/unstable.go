@@ -9,7 +9,7 @@ import (
 type Unstable struct {
 	deviation float64
 	r         *rand.Rand
-	lock      sync.Mutex
+	lock      *sync.Mutex
 }
 
 func NewUnstable(deviation float64) Unstable {
@@ -22,7 +22,7 @@ func NewUnstable(deviation float64) Unstable {
 	return Unstable{
 		deviation: deviation,
 		r:         rand.New(rand.NewSource(time.Now().UnixNano())),
-		lock:      sync.Mutex{},
+		lock:      new(sync.Mutex),
 	}
 }
 

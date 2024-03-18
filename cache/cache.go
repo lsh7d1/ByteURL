@@ -17,6 +17,7 @@ const (
 	defaultInterval = time.Second
 	// Default expiration time perturbation to prevent
 	// cache from expiring at the same time
+	// Example: this will make the expiration time distributed in [0.9, 1.1] seconds
 	defaultExpireDeviation = 0.1
 )
 
