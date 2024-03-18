@@ -1,11 +1,13 @@
 package main
 
 import (
-	"byteurl/cache"
-	"github.com/tidwall/redcon"
 	"log"
 	"strings"
 	"time"
+
+	"byteurl/cache"
+
+	"github.com/tidwall/redcon"
 )
 
 var addr string = ":6380"
@@ -39,15 +41,9 @@ func main() {
 				} else {
 					conn.WriteBulkString(val)
 				}
-			case "del":
-				if len(cmd.Args) != 2 {
-					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
-					return
-				}
-				c.Del(string(cmd.Args[1]))
-				conn.WriteString("OK")
+				// case "del":
+				// TODO: Cache's Del has no return value, and the redis client needs the server's return value.
 			}
-
 		},
 		func(conn redcon.Conn) bool {
 			// Use this function to accept or deny the connection.
