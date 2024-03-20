@@ -13,7 +13,7 @@ import (
 var addr string = ":6380"
 
 func main() {
-	c := cache.NewCache("test", time.Minute, cache.WithAroundCapLimit(1919810))
+	c := cache.NewCache("test", time.Minute, cache.WithAroundCapLimit(11919810))
 	log.Printf("Started Server at: %s", addr)
 	err := redcon.ListenAndServe(
 		addr,
@@ -28,7 +28,10 @@ func main() {
 					conn.WriteError("ERR wrong number of arguments for '" + string(cmd.Args[0]) + "' command")
 					return
 				}
-				c.Set(string(cmd.Args[1]), string(cmd.Args[2]))
+				_, _ = c.Take(string(cmd.Args[1]), func() (string, error) {
+					return string(cmd.Args[2]), nil
+				})
+				// c.Set(string(cmd.Args[1]), string(cmd.Args[2]))
 				conn.WriteString("OK")
 			case "get":
 				if len(cmd.Args) != 2 {

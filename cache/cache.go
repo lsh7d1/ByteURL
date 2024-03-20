@@ -75,11 +75,7 @@ func (c *Cache) Get(key string) (string, bool) {
 }
 
 func (c *Cache) Del(key string) {
-	// c.lock.Lock()
 	c.data.Del(key)
-	fmt.Println("Delete ~~!!!!")
-	// c.lock.Unlock()
-	c.timingWheel.RemoveTask(key)
 }
 
 func (c *Cache) Set(key string, value string) {
@@ -89,11 +85,6 @@ func (c *Cache) Set(key string, value string) {
 
 func (c *Cache) SetWithExpire(key string, value string, expire time.Duration) {
 	c.data.Add(key, value)
-
-	exp := c.unstableExpire.AroundDuration(expire)
-	c.timingWheel.AddTask(key, exp, func() {
-		c.Del(key)
-	})
 }
 
 // Take Try to get the value of the specified key in the Cache
