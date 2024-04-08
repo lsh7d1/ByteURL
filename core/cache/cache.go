@@ -1,13 +1,13 @@
 package cache
 
 import (
-	"byteurl/mathx"
 	"fmt"
 	"sync"
 	"time"
 
-	"byteurl/syncx"
-	"byteurl/timex"
+	"byteurl/core/mathx"
+	"byteurl/core/syncx"
+	"byteurl/core/timex"
 )
 
 const (

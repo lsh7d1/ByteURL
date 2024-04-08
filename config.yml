@@ -1,0 +1,29 @@
+mode: "dev"
+port: 8080
+name: "byteurl"
+version: "v0.1"
+start_time: "2024-03-27"
+machine_id: 1
+
+mysql:
+  host: "127.0.0.1"
+  user: "root"
+  password: "root1234"
+  db: "db3"
+  port: 13306
+  max_open_conns: 100
+  max_idle_conns: 20
+
+redis:
+  host: "127.0.0.1"
+  port: 16379
+  db: 0
+  password: ""
+  pool_size: 100
+
+log:
+  level: "debug"
+  filename: "./log.json"
+  max_size: 1000
+  max_age: 3600
+  max_backups: 5
