@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -9,7 +10,8 @@ import (
 
 	"byteurl/core/cache"
 	"byteurl/dal/dao"
-	"byteurl/dal/query"
+	"byteurl/dal/model"
+	"byteurl/mq"
 	pb "byteurl/pb/api/leaf/v1"
 	"byteurl/pkg/connect"
 	"byteurl/pkg/encode"
@@ -21,6 +23,8 @@ import (
 )
 
 var (
+	ErrExistData = errors.New("existing data")
+
 	cli      pb.LeafSegmentServiceClient
 	_        = cli
 	memcache = cache.NewCache("byteurl", time.Hour, cache.WithAroundCapLimit(1e6))
@@ -35,56 +39,50 @@ func init() {
 	if err != nil {
 		log.Fatalf("grpc.NewClient failed, err: %v", err)
 	}
-	defer conn.Close()
 
 	cli = pb.NewLeafSegmentServiceClient(conn)
-	// ctx := context.TODO()
-	// resp, err := cli.GetSegmentId(ctx, &v1.GenIdsRequest{BizTag: "bbbb", Count: 1})
-	// if err != nil {
-	// 	fmt.Printf("c.GetSegmentId failed, err:%v\n", err)
-	// 	return
-	// }
-	// fmt.Printf("resp:%v\n", resp.GetIds())
 }
 
-func GenShortURL(ctx context.Context, origin string) (shorturl string, err error) {
-	// 空数据
-	if len(origin) == 0 {
-		return "", errors.New("invalid originURL")
+func GenShortURL(ctx context.Context, longurl string) (shorturl string, err error) {
+	// 空数据 TODO: 路由层做
+	if len(longurl) == 0 {
+		return "", errors.New("invalid longurl")
 	}
-	// 不通
-	if ok := connect.Get(origin); !ok {
-		return "", errors.New("invalid originURL")
+	// 长链不通
+	if ok := connect.Get(longurl); !ok {
+		return "", errors.New("invalid longurl")
 	}
-	// 重复
-	md5Value := encode.Sum([]byte(origin))
-	_, err = query.Short.WithContext(ctx).Where(query.Short.Md5.Eq(md5Value)).First()
-	if err != dao.ErrNotFound {
-		if err == nil {
-			return "", errors.New("duplicate originURL")
-		}
+
+	// 重复创建
+	md5Value := encode.Sum([]byte(longurl))
+	// 1.查内存缓存
+	if _, ok := memcache.Get(md5Value); ok {
+		return "", ErrExistData
+	}
+	// 2.查缓存
+	err = dao.Get(ctx, md5Value)
+	if err != dao.RedisErrNotFound {
+		return "", ErrExistData
+	}
+	// 3.查数据库
+	if err = dao.PeekMd5NotExist(ctx, md5Value); err != nil {
 		return "", err
 	}
-	// 循环
-	basePath, err := urltool.GetBasePath(origin)
+
+	// 循环创建
+	basePath, err := urltool.GetBasePath(longurl)
 	if err != nil {
 		return "", fmt.Errorf("urltool.GetBasePath failed, err: %v", err)
 	}
-	_, err = query.Short.WithContext(ctx).Where(query.Short.Surl.Eq(basePath)).First()
-	if err != dao.ErrNotFound {
-		if err == nil {
-			return "", errors.New("duplicate shortURL")
-		}
+	if err = dao.PeekShortURLNotExist(ctx, basePath); err != nil {
 		return "", err
 	}
 
 	var short string
 	for {
-		ctx1, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
 		// TODO: 取消硬编码
 		// rpc取号
-		resp, err := cli.GetSegmentId(ctx1, &pb.GenIdsRequest{BizTag: "bbbb", Count: 1})
+		resp, err := cli.GetSegmentId(ctx, &pb.GenIdsRequest{BizTag: "bbbb", Count: 1})
 		if err != nil {
 			return "", err
 		}
@@ -97,7 +95,21 @@ func GenShortURL(ctx context.Context, origin string) (shorturl string, err error
 	fmt.Printf("short: %v\n", short)
 
 	// 存储
-	memcache.Set(short, origin)
+	s := &model.Short{
+		Lurl:     longurl,
+		Md5:      md5Value,
+		Surl:     short,
+		CreateBy: "lsh7d1",
+	}
+	// 1.写缓存
+	if err := dao.Set(ctx, []string{short}, []string{longurl}); err != nil {
+		return "", err
+	}
+	// 2.写mq
+	shortJson, _ := json.Marshal(s)
+	mq.WriteMessage(ctx, []mq.MqEntity{{Key: []byte(short), Value: []byte(shortJson)}})
+	// 3.写内存缓存
+	memcache.Set(short, longurl)
 
 	return "lsh7d1.com/" + short, nil
 }

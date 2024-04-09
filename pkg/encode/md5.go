@@ -7,5 +7,7 @@ import (
 
 // Sum 对传入的参数求md5值
 func Sum(data []byte) string {
-	return hex.EncodeToString(md5.New().Sum(data)) // 32位16进制数
+	h := md5.New()
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil)) // 32位16进制数
 }
